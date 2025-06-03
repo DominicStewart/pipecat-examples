@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import os
 import sys
-from dataclasses import dataclass
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -32,7 +31,11 @@ from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.google import GoogleLLMService
 from pipecat.services.google.google import GoogleLLMContext
-from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
+from pipecat.transports.services.daily import (
+    DailyDialinSettings,
+    DailyParams,
+    DailyTransport,
+)
 
 load_dotenv(override=True)
 
@@ -81,7 +84,9 @@ class UserAudioCollector(FrameProcessor):
                 # Append the audio frame to our buffer. Treat the buffer as a ring buffer, dropping the oldest
                 # frames as necessary. Assume all audio frames have the same duration.
                 self._audio_frames.append(frame)
-                frame_duration = len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                frame_duration = (
+                    len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                )
                 buffer_duration = frame_duration * len(self._audio_frames)
                 while buffer_duration > self._start_secs:
                     self._audio_frames.pop(0)
@@ -90,28 +95,63 @@ class UserAudioCollector(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def respond_with_apple(
-    function_name, tool_call_id, args, llm: LLMService, context, result_callback
-):
-    """Function the bot can call to return Apple."""
+class ContextSwitcher:
+    def __init__(self, llm, context_aggregator):
+        self._llm = llm
+        self._context_aggregator = context_aggregator
 
-    await llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+    async def switch_context(self, system_instruction):
+        """Switch the context to a new system instruction based on what the bot hears."""
+        # Create messages with updated system instruction
+        messages = [
+            {
+                "role": "system",
+                "content": system_instruction,
+            }
+        ]
+
+        # Update context with new messages
+        self._context_aggregator.set_messages(messages)
+        # Get the context frame with the updated messages
+        context_frame = self._context_aggregator.get_context_frame()
+        # Trigger LLM response by pushing a context frame
+        await self._llm.push_frame(context_frame)
 
 
-async def respond_with_banana(
-    function_name, tool_call_id, args, llm: LLMService, context, result_callback
-):
-    """Function the bot can call to return Banana."""
+class FunctionHandlers:
+    def __init__(self, context_switcher):
+        self.context_switcher = context_switcher
 
-    await llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+    async def voicemail_response(
+        self,
+        function_name,
+        tool_call_id,
+        args,
+        llm: LLMService,
+        context,
+        result_callback,
+    ):
+        """Function the bot can call to leave a voicemail message."""
+        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
 
+                    "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
 
-async def respond_with_orange(
-    function_name, tool_call_id, args, llm: LLMService, context, result_callback
-):
-    """Function the bot can call to return Orange."""
+                    After saying this message, call the terminate_call function."""
 
-    await llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+        await self.context_switcher.switch_context(system_instruction=message)
+        await result_callback("Leaving a voicemail message")
+
+    async def human_conversation(
+        self,
+        function_name,
+        tool_call_id,
+        args,
+        llm: LLMService,
+        context,
+        result_callback,
+    ):
+        """Function the bot can when it detects it's talking to a human."""
+        await llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
 
 
 async def terminate_call(
@@ -130,11 +170,22 @@ async def main(
     detect_voicemail: bool,
     dialout_number: Optional[str],
 ):
-    transport = DailyTransport(
-        room_url,
-        token,
-        "Chatbot",
-        DailyParams(
+    dialin_settings = None
+    if callId != "None" and callDomain != "None":
+        dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+        transport_params = DailyParams(
+            api_url=daily_api_url,
+            api_key=daily_api_key,
+            dialin_settings=dialin_settings,
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            camera_out_enabled=False,
+            vad_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+            vad_audio_passthrough=True,
+        )
+    else:
+        transport_params = DailyParams(
             api_url=daily_api_url,
             api_key=daily_api_key,
             audio_in_enabled=True,
@@ -143,8 +194,13 @@ async def main(
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            # transcription_enabled=True,
-        ),
+        )
+
+    transport = DailyTransport(
+        room_url,
+        token,
+        "Chatbot",
+        transport_params,
     )
 
     tts = ElevenLabsTTSService(
@@ -154,22 +210,18 @@ async def main(
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    ### APPLE PIPELINE
+    ### VOICEMAIL PIPELINE
 
     tools = [
         {
             "function_declarations": [
                 {
-                    "name": "respond_with_apple",
-                    "description": "Call this function when the user asks about apples.",
+                    "name": "switch_to_voicemail_response",
+                    "description": "Call this function when you detect this is a voicemail system.",
                 },
                 {
-                    "name": "respond_with_banana",
-                    "description": "Call this function when the user asks about bananas.",
-                },
-                {
-                    "name": "respond_with_orange",
-                    "description": "Call this function when the user asks about oranges.",
+                    "name": "switch_to_human_conversation",
+                    "description": "Call this function when you detect this is a human.",
                 },
                 {
                     "name": "terminate_call",
@@ -179,205 +231,193 @@ async def main(
         }
     ]
 
-    respond_with_apple_instruction = """
-Always respond with the word 'Apple'.
+    system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
 
-You have access to the following functions that you can call:
-- respond_with_apple: Call this function when the user asks about apples.
-- respond_with_banana: Call this function when the user asks about bananas.
-- respond_with_orange: Call this function when the user asks about oranges.
-- terminate_call: Call this function to terminate the call.
+    If you hear any of these phrases (or very similar ones):
+    - "Please leave a message after the beep"
+    - "No one is available to take your call"
+    - "Record your message after the tone"
+    - "You have reached voicemail for..."
+    - "You have reached [phone number]"
+    - "[phone number] is unavailable"
+    - "The person you are trying to reach..."
+    - "The number you have dialed..."
+    - "Your call has been forwarded to an automated voice messaging system"
 
-If the user mentions bananas or oranges, call the appropriate function instead of responding with 'Apple'.
-If the user asks to terminate the call, call the terminate_call function.
-"""
+    Then call the function switch_to_voicemail_response.
 
-    apple_llm = GoogleLLMService(
+    If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
+
+    DO NOT say anything until you've determined if this is a voicemail or human."""
+
+    voicemail_detection_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-lite",
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=respond_with_apple_instruction,
+        system_instruction=system_instruction,
         tools=tools,
     )
 
-    apple_context = GoogleLLMContext()
-    apple_context_aggregator = apple_llm.create_context_aggregator(apple_context)
+    voicemail_detection_context = GoogleLLMContext()
+    voicemail_detection_context_aggregator = (
+        voicemail_detection_llm.create_context_aggregator(voicemail_detection_context)
+    )
+    context_switcher = ContextSwitcher(
+        voicemail_detection_llm, voicemail_detection_context_aggregator
+    )
+    handlers = FunctionHandlers(context_switcher)
 
-    apple_llm.register_function("respond_with_apple", respond_with_apple)
-    apple_llm.register_function("respond_with_banana", respond_with_banana)
-    apple_llm.register_function("respond_with_orange", respond_with_orange)
-    apple_llm.register_function("terminate_call", terminate_call)
+    voicemail_detection_llm.register_function(
+        "switch_to_voicemail_response", handlers.voicemail_response
+    )
+    voicemail_detection_llm.register_function(
+        "switch_to_human_conversation", handlers.human_conversation
+    )
+    voicemail_detection_llm.register_function("terminate_call", terminate_call)
 
-    apple_audio_collector = UserAudioCollector(apple_context, apple_context_aggregator.user())
+    voicemail_detection_audio_collector = UserAudioCollector(
+        voicemail_detection_context, voicemail_detection_context_aggregator.user()
+    )
 
-    apple_pipeline = Pipeline(
+    voicemail_detection_pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            apple_audio_collector,  # Collect audio frames
-            apple_context_aggregator.user(),  # User responses
-            apple_llm,  # LLM
+            voicemail_detection_audio_collector,  # Collect audio frames
+            voicemail_detection_context_aggregator.user(),  # User responses
+            voicemail_detection_llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            apple_context_aggregator.assistant(),  # Assistant spoken responses
+            voicemail_detection_context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
-    apple_pipeline_task = PipelineTask(
-        apple_pipeline,
+    voicemail_detection_pipeline_task = PipelineTask(
+        voicemail_detection_pipeline,
         params=PipelineParams(allow_interruptions=True),
     )
 
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        await transport.capture_participant_transcription(participant["id"])
+    if dialout_number:
+        logger.debug("dialout number detected; doing dialout")
+
+        # Configure some handlers for dialing out
+        @transport.event_handler("on_joined")
+        async def on_joined(transport, data):
+            logger.debug(f"Joined; starting dialout to: {dialout_number}")
+            await transport.start_dialout({"phoneNumber": dialout_number})
+
+        @transport.event_handler("on_dialout_connected")
+        async def on_dialout_connected(transport, data):
+            logger.debug(f"Dial-out connected: {data}")
+
+        @transport.event_handler("on_dialout_answered")
+        async def on_dialout_answered(transport, data):
+            logger.debug(f"Dial-out answered: {data}")
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            await transport.capture_participant_transcription(participant["id"])
+            # unlike the dialin case, for the dialout case, the caller will speak first. Presumably
+            # they will answer the phone and say "Hello?" Since we've captured their transcript,
+            # That will put a frame into the pipeline and prompt an LLM completion, which is how the
+            # bot will then greet the user.
+    elif detect_voicemail:
+        logger.debug(
+            "Detect voicemail example. You can test this in example in Daily Prebuilt"
+        )
+
+        # For the voicemail detection case, we do not want the bot to answer the phone. We want it to wait for the voicemail
+        # machine to say something like 'Leave a message after the beep', or for the user to say 'Hello?'.
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            await transport.capture_participant_transcription(participant["id"])
+    else:
+        logger.debug("no dialout number; assuming dialin")
+
+        # Different handlers for dialin
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            await transport.capture_participant_transcription(participant["id"])
+            # For the dialin case, we want the bot to answer the phone and greet the user. We
+            # can prompt the bot to speak by putting the context into the pipeline.
+            await voicemail_detection_pipeline_task.queue_frames(
+                [voicemail_detection_context_aggregator.user().get_context_frame()]
+            )
 
     runner = PipelineRunner()
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        await apple_pipeline_task.queue_frame(EndFrame())
+        await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
-    print("!!! starting apple pipeline")
-    await runner.run(apple_pipeline_task)
-    print("!!! Done with apple pipeline")
+    print("!!! starting voicemail detection pipeline")
+    await runner.run(voicemail_detection_pipeline_task)
+    print("!!! Done with voicemail detection pipeline")
 
-    ### BANANA PIPELINE
+    ### HUMAN CONVERSATION PIPELINE
 
-    respond_with_banana_instruction = """
-    Always respond with the word 'Banana'.
+    human_conversation_system_instruction = """You are Chatbot talking to a human. Be friendly and helpful.
 
-    You have access to the following functions that you can call:
-    - respond_with_apple: Call this function when the user asks about apples.
-    - respond_with_banana: Call this function when the user asks about bananas.
-    - respond_with_orange: Call this function when the user asks about oranges.
-    - terminate_call: Call this function to terminate the call.
+    Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
 
-    If the user mentions apples or oranges, call the appropriate function instead of responding with 'Banana'.
-    If the user asks to terminate the call, call the terminate_call function.
-    """
+    Keep your responses brief and to the point. Listen to what the person says.
 
-    banana_llm = GoogleLLMService(
-        # model="models/gemini-2.0-flash-lite",
+    When the person indicates they're done with the conversation by saying something like:
+    - "Goodbye"
+    - "That's all"
+    - "I'm done"
+    - "Thank you, that's all I needed"
+
+    THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function."""
+
+    human_conversation_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-001",
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=respond_with_banana_instruction,
+        system_instruction=human_conversation_system_instruction,
         tools=tools,
     )
-    banana_context = GoogleLLMContext()
+    human_conversation_context = GoogleLLMContext()
 
-    banana_context_aggregator = banana_llm.create_context_aggregator(banana_context)
+    human_conversation_context_aggregator = (
+        human_conversation_llm.create_context_aggregator(human_conversation_context)
+    )
 
-    banana_llm.register_function("respond_with_apple", respond_with_apple)
-    banana_llm.register_function("respond_with_banana", respond_with_banana)
-    banana_llm.register_function("respond_with_orange", respond_with_orange)
-    banana_llm.register_function("terminate_call", terminate_call)
+    human_conversation_llm.register_function("terminate_call", terminate_call)
 
-    # banana_audio_collector = UserAudioCollector(banana_context, banana_context_aggregator.user())
-
-    banana_pipeline = Pipeline(
+    human_conversation_pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,
-            banana_context_aggregator.user(),  # User responses
-            banana_llm,  # LLM
+            human_conversation_context_aggregator.user(),  # User responses
+            human_conversation_llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            banana_context_aggregator.assistant(),  # Assistant spoken responses
+            human_conversation_context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
-    banana_pipeline_task = PipelineTask(
-        banana_pipeline,
+    human_conversation_pipeline_task = PipelineTask(
+        human_conversation_pipeline,
         params=PipelineParams(allow_interruptions=True),
     )
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        await apple_pipeline_task.queue_frame(EndFrame())
-        await banana_pipeline_task.queue_frame(EndFrame())
+        await voicemail_detection_pipeline_task.queue_frame(EndFrame())
+        await human_conversation_pipeline_task.queue_frame(EndFrame())
 
-    print("!!! starting banana pipeline")
-    banana_context_aggregator.user().set_messages(
+    print("!!! starting human conversation pipeline")
+    human_conversation_context_aggregator.user().set_messages(
         [
             {
                 "role": "system",
-                "content": respond_with_banana_instruction,
+                "content": human_conversation_system_instruction,
             }
         ]
     )
-    await banana_pipeline_task.queue_frames([banana_context_aggregator.user().get_context_frame()])
-    await runner.run(banana_pipeline_task)
-
-    print("!!! Done with banana pipeline")
-
-    ### ORANGE PIPELINE
-
-    respond_with_orange_instruction = """
-    Always respond with the word 'Orange'.
-
-    You have access to the following functions that you can call:
-    - respond_with_apple: Call this function when the user asks about apples.
-    - respond_with_banana: Call this function when the user asks about bananas.
-    - respond_with_orange: Call this function when the user asks about oranges.
-    - terminate_call: Call this function to terminate the call.
-
-    If the user mentions apples or bananas, call the appropriate function instead of responding with 'Orange'.
-    If the user asks to terminate the call, call the terminate_call function.
-    """
-
-    orange_llm = GoogleLLMService(
-        # model="models/gemini-2.0-flash-lite",
-        model="models/gemini-2.0-flash-001",
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=respond_with_orange_instruction,
-        tools=tools,
+    await human_conversation_pipeline_task.queue_frames(
+        [human_conversation_context_aggregator.user().get_context_frame()]
     )
+    await runner.run(human_conversation_pipeline_task)
 
-    orange_context = GoogleLLMContext()
-
-    orange_context_aggregator = orange_llm.create_context_aggregator(orange_context)
-
-    # orange_audio_collector = UserAudioCollector(orange_context, orange_context_aggregator.user())
-
-    orange_llm.register_function("respond_with_apple", respond_with_apple)
-    orange_llm.register_function("respond_with_banana", respond_with_banana)
-    orange_llm.register_function("respond_with_orange", respond_with_orange)
-    orange_llm.register_function("terminate_call", terminate_call)
-
-    orange_pipeline = Pipeline(
-        [
-            transport.input(),  # Transport user input
-            stt,
-            orange_context_aggregator.user(),  # User responses
-            orange_llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            orange_context_aggregator.assistant(),  # Assistant spoken responses
-        ]
-    )
-
-    orange_pipeline_task = PipelineTask(
-        orange_pipeline,
-        params=PipelineParams(allow_interruptions=True),
-    )
-
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport, participant, reason):
-        await apple_pipeline_task.queue_frame(EndFrame())
-        await banana_pipeline_task.queue_frame(EndFrame())
-        await orange_pipeline_task.queue_frame(EndFrame())
-
-    print("!!! starting orange pipeline")
-    orange_context_aggregator.user().set_messages(
-        [
-            {
-                "role": "system",
-                "content": respond_with_orange_instruction,
-            }
-        ]
-    )
-    await orange_pipeline_task.queue_frames([orange_context_aggregator.user().get_context_frame()])
-    await runner.run(orange_pipeline_task)
-
-    print("!!! Done with orange pipeline")
+    print("!!! Done with human conversation pipeline")
 
 
 if __name__ == "__main__":
