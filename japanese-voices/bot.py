@@ -122,10 +122,11 @@ async def run_bot(
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
         transcription_enabled=True,
         transcription_settings=DailyTranscriptionSettings(
+            language="multi",
             extra={
                 "mip_opt_out": True,
                 "keywords": ["Mustang:5", "Kwindla:5", "Snuffleupagus:10"],
-            }
+            },
         ),
     )
 
@@ -430,32 +431,31 @@ async def run_bot(
 
     # ---------------- NEXT PIPELINE ----------------
 
-    gemini_pipeline_system_instructions = (
-        """
-                - You are a helpful assistant that tells stories in Japanese.
-                - The user will only speak English to you. But you will always respond in Japanese.
-                - Start by telling them the Pipeline has now changed in Japanese.
-                - Now read this excerpt from "吾輩は猫である" in Japanese:
-                "吾輩は猫である":
-                吾輩は猫である。名前はまだ無い。
-                どこで生れたかとんと見当がつかぬ。
-                何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
-                吾輩はここで始めて人間というものを見た。
-                しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
-                この書生というのは時々我々を捕えて煮て食うという話である。
-                しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
-                ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
-                - If the user says "No", continue the conversation normally.                    
-                Rules:
-                1. Always respond in Japanese.
-                2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese.""",
-    )
+    gemini_pipeline_system_instructions = """
+    - You are a helpful assistant that tells stories in Japanese.
+    - The user will only speak English to you. But you will always respond in Japanese.
+    - Start by telling them the Pipeline has now changed in Japanese.
+    - Now read this excerpt from "吾輩は猫である" in Japanese:
+    "吾輩は猫である":
+    吾輩は猫である。名前はまだ無い。
+    どこで生れたかとんと見当がつかぬ。
+    何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
+    吾輩はここで始めて人間というものを見た。
+    しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
+    この書生というのは時々我々を捕えて煮て食うという話である。
+    しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
+    ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
+    - If the user says "No", continue the conversation normally.                    
+    Rules:
+    1. Always respond in Japanese.
+    2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese."""
 
     gemini_llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        # voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         system_instruction=gemini_pipeline_system_instructions,
-        model="gemini-2.5-flash-preview-05-20",
+        # model="gemini-2.5-flash-preview-05-20",
+        model="models/gemini-2.5-flash-preview-native-audio-dialog",
         transcribe_user_audio=True,
     )
 
