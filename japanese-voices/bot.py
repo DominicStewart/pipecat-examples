@@ -15,9 +15,19 @@ from loguru import logger
 from deepgram import LiveOptions
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.observers.loggers.transcription_log_observer import (
     TranscriptionLogObserver,
 )
+from pipecat.frames.frames import (
+    EndFrame,
+    InputAudioRawFrame,
+    StopTaskFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -38,12 +48,60 @@ from pipecat.transports.services.daily import (
     DailyTransport,
     DailyTranscriptionSettings,
 )
+from pipecat.services.google.google import GoogleLLMContext
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.gemini_multimodal_live.gemini import (
+    GeminiMultimodalLiveLLMService,
+)
 
 
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+
+class UserAudioCollector(FrameProcessor):
+    """Collects audio frames in a buffer, then adds them to the LLM context when the user stops speaking."""
+
+    def __init__(self, context, user_context_aggregator):
+        super().__init__()
+        self._context = context
+        self._user_context_aggregator = user_context_aggregator
+        self._audio_frames = []
+        self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
+        self._user_speaking = False
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            # Skip transcription frames - we're handling audio directly
+            return
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            self._user_speaking = True
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_speaking = False
+            self._context.add_audio_frames_message(audio_frames=self._audio_frames)
+            await self._user_context_aggregator.push_frame(
+                self._user_context_aggregator.get_context_frame()
+            )
+        elif isinstance(frame, InputAudioRawFrame):
+            if self._user_speaking:
+                # When speaking, collect frames
+                self._audio_frames.append(frame)
+            else:
+                # Maintain a rolling buffer of recent audio (for start of speech)
+                self._audio_frames.append(frame)
+                frame_duration = (
+                    len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                )
+                buffer_duration = frame_duration * len(self._audio_frames)
+                while buffer_duration > self._start_secs:
+                    self._audio_frames.pop(0)
+                    buffer_duration -= frame_duration
+
+        await self.push_frame(frame, direction)
 
 
 async def run_bot(
@@ -61,11 +119,14 @@ async def run_bot(
         audio_in_enabled=True,
         audio_out_enabled=True,
         video_out_enabled=False,
-        vad_analyzer=SileroVADAnalyzer(),
-        # transcription_enabled=True,
-        # transcription_settings=DailyTranscriptionSettings(
-        #    language="multi", model="nova-3"
-        # ),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+        transcription_enabled=True,
+        transcription_settings=DailyTranscriptionSettings(
+            extra={
+                "mip_opt_out": True,
+                "keywords": ["Mustang:5", "Kwindla:5", "Snuffleupagus:10"],
+            }
+        ),
     )
 
     transport = DailyTransport(room_url, token, "Japanese Bot", params)
@@ -154,26 +215,37 @@ async def run_bot(
             }
         )
 
+    async def switch_pipeline(params: FunctionCallParams):
+        """Switch the pipeline based on the current provider and voice."""
+        await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+
     switch_voice_function = FunctionSchema(
         name="switch_voice",
-        description="TTSプロバイダーの音声を切り替えます",
+        description="Call this function to switch the voice used by the TTS provider.",
         properties={
             "voice": {
                 "type": "string",
-                "description": "切り替える音声を指定します（'male' または 'female'）",
+                "description": "The voice to switch to. Available options are male or female",
                 "enum": ["male", "female"],
             }
         },
         required=["voice"],
     )
 
+    switch_pipeline_function = FunctionSchema(
+        name="switch_pipeline",
+        description="Call this function to switch the pipeline.",
+        properties={},
+        required=[],
+    )
+
     switch_tts_function = FunctionSchema(
         name="switch_tts",
-        description="利用するTTSプロバイダーを切り替えます",
+        description="Call this function to switch the TTS provider.",
         properties={
             "provider": {
                 "type": "string",
-                "description": "切り替えるTTSプロバイダーを指定します",
+                "description": "The TTS provider to switch to. Available options are: Cartesia, ElevenLabs, Azure, OpenAI.",
                 # Cartesia, ElevenLabs, Azure, OpenAI のいずれか
                 "enum": ["cartesia", "elevenlabs", "azure", "openai"],
             }
@@ -183,24 +255,25 @@ async def run_bot(
 
     llm.register_function("switch_voice", switch_voice)
     llm.register_function("switch_tts", switch_tts)
+    llm.register_function("switch_pipeline", switch_pipeline)
 
-    tools = ToolsSchema(standard_tools=[switch_voice_function, switch_tts_function])
+    tools = ToolsSchema(
+        standard_tools=[
+            switch_voice_function,
+            switch_tts_function,
+            switch_pipeline_function,
+        ]
+    )
 
     messages_jp = [
         {
             "role": "system",
             "content": """
-            あなたは、TTSプロバイダーと音声を切り替えることができる役立つアシスタントです。
-            以下の動作ルールに従ってください：
-
-            1. 利用可能なTTSプロバイダー：Cartesia、ElevenLabs、Azure、OpenAI。
-            各プロバイダーには「male」（男性の声）と「female」（女性の声）の2種類の音声があります。
-            - 音声を切り替えるには switch_voice 関数を呼び出してください。
-            - プロバイダーを切り替えるには switch_tts 関数を呼び出してください。
-
-            2. ユーザーが最初に参加したら、必ず「物語を聞きたいですか？」と日本語で尋ねてください。
-            - ユーザーが「はい」と答えた場合は、以下の文章をすべて読み上げてください：
-                ―――――――――――――――――――――――――――
+            - You are a helpful assistant that can switch TTS providers, voices or pipelines.
+            - The user will only speak English to you. But you will always respond in Japanese.
+            - Please ask the user if they want to hear a story, and if they say yes, read the excerpt from "吾輩は猫である" in Japanese.
+            - If the user asks you to tell them a story, you will read the following excerpt from "吾輩は猫である" in Japanese.
+            "吾輩は猫である":
                 吾輩は猫である。名前はまだ無い。
                 どこで生れたかとんと見当がつかぬ。
                 何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
@@ -209,18 +282,22 @@ async def run_bot(
                 この書生というのは時々我々を捕えて煮て食うという話である。
                 しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
                 ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
-                ―――――――――――――――――――――――――――
-            - ユーザーが「いいえ」または他の回答をした場合は、通常の会話を続けてください。
-
-            3. ユーザーが日本語で「女性の声に切り替えて」などと発話したときは、switch_voice を呼び出して音声を切り替えた後、
-            自動的に上記の「吾輩は猫である」の抜粋を読み始めてください。
-
-            4. ユーザーが日本語で「Azureに切り替えて」などと発話したときは、switch_tts を呼び出して
-            プロバイダーを切り替えた後、同じく抜粋を読み始めてください。
-
-            5. それ以外の会話はすべて日本語で行ってください。
-
-            6. 返答は常に日本語で、丁寧かつ親しみやすい口調でお願いします。
+            - If the user says "No", continue the conversation normally.
+            - Each TTS provider has a male or female voice available. You can switch between them.
+            - If the user asks to switch voices, you will call the switch_voice function with the appropriate voice.
+            - If the user does not specify male or female, please ask them which voice they prefer.
+            - There are four TTS providers available: Cartesia, ElevenLabs, Azure, and OpenAI.
+            - If the user asks to switch TTS providers, you will call the switch_tts function with the appropriate provider.
+            - If the user does not specify a provider, please ask them which provider they prefer.
+            - If the user asks to switch pipelines, you will call the switch_pipeline function.
+            
+            Rules:
+            1. Always respond in Japanese.
+            2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese.
+            3. If the user asks to switch voices, call the switch_voice function with the appropriate voice.
+            4. If the user asks to switch TTS providers, call the switch_tts function with the appropriate provider.
+            5. If the user asks to switch pipelines, call the switch_pipeline function.
+            6. If the user asks to switch voices or TTS providers, always ask them which voice or provider they prefer.
             """,
         }
     ]
@@ -315,18 +392,24 @@ async def run_bot(
             {
                 "role": "system",
                 "content": (
-                    """ユーザーが参加したら、まず「物語を聞きたいですか？」と尋ねてください。"
-                    もしユーザーが「はい」と答えた場合、以下の文章をそのまま日本語で読み上げてください：
-                    吾輩は猫である。名前はまだ無い。
-                    どこで生れたかとんと見当がつかぬ。
-                    何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
-                    吾輩はここで始めて人間というものを見た。
-                    しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
-                    この書生というのは時々我々を捕えて煮て食うという話である。
-                    しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
-                    ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
-                    
-                    ユーザーが「いいえ」または他の回答をした場合は、その旨を受けて次の指示に従ってください。"""
+                    """
+                    - You are a helpful assistant that tells stories in Japanese.
+                    - The user will only speak English to you. But you will always respond in Japanese.
+                    - Please ask the user if they want to hear a story, and if they say yes, read the excerpt from "吾輩は猫である" in Japanese.
+                    - If the user asks you to tell them a story, you will read the following excerpt from "吾輩は猫である" in Japanese.
+                    "吾輩は猫である":
+                        吾輩は猫である。名前はまだ無い。
+                        どこで生れたかとんと見当がつかぬ。
+                        何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
+                        吾輩はここで始めて人間というものを見た。
+                        しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
+                        この書生というのは時々我々を捕えて煮て食うという話である。
+                        しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
+                        ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
+                    - If the user says "No", continue the conversation normally.                    
+                    Rules:
+                    1. Always respond in Japanese.
+                    2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese."""
                 ),
             }
         )
@@ -344,6 +427,123 @@ async def run_bot(
 
     # Start the pipeline runner
     await runner.run(task)
+
+    # ---------------- NEXT PIPELINE ----------------
+
+    gemini_pipeline_system_instructions = (
+        """
+                - You are a helpful assistant that tells stories in Japanese.
+                - The user will only speak English to you. But you will always respond in Japanese.
+                - Start by telling them the Pipeline has now changed in Japanese.
+                - Now read this excerpt from "吾輩は猫である" in Japanese:
+                "吾輩は猫である":
+                吾輩は猫である。名前はまだ無い。
+                どこで生れたかとんと見当がつかぬ。
+                何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
+                吾輩はここで始めて人間というものを見た。
+                しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
+                この書生というのは時々我々を捕えて煮て食うという話である。
+                しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
+                ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
+                - If the user says "No", continue the conversation normally.                    
+                Rules:
+                1. Always respond in Japanese.
+                2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese.""",
+    )
+
+    gemini_llm = GeminiMultimodalLiveLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        system_instruction=gemini_pipeline_system_instructions,
+        model="gemini-2.5-flash-preview-05-20",
+        transcribe_user_audio=True,
+    )
+
+    # gemini_context = GoogleLLMContext()
+    gemini_context = OpenAILLMContext(
+        [
+            {
+                "role": "user",
+                "content": """
+                - You are a helpful assistant that tells stories in Japanese.
+                - The user will only speak English to you. But you will always respond in Japanese.
+                - Start by telling them the Pipeline has now changed in Japanese.
+                - Now read this excerpt from "吾輩は猫である" in Japanese:
+                "吾輩は猫である":
+                吾輩は猫である。名前はまだ無い。
+                どこで生れたかとんと見当がつかぬ。
+                何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
+                吾輩はここで始めて人間というものを見た。
+                しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
+                この書生というのは時々我々を捕えて煮て食うという話である。
+                しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
+                ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
+            - If the user says "No", continue the conversation normally.                    
+            Rules:
+            1. Always respond in Japanese.
+            2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese.""",
+            }
+        ]
+    )
+    gemini_context_aggregator = gemini_llm.create_context_aggregator(gemini_context)
+
+    gemini_audio_collector = UserAudioCollector(
+        gemini_context, gemini_context_aggregator.user()
+    )
+
+    gemini_pipeline = Pipeline(
+        [
+            transport.input(),
+            # gemini_audio_collector,
+            gemini_context_aggregator.user(),
+            gemini_llm,
+            transport.output(),
+            gemini_context_aggregator.assistant(),
+        ]
+    )
+
+    gemini_pipeline_task = PipelineTask(
+        gemini_pipeline,
+        params=PipelineParams(allow_interruptions=True),
+    )
+
+    # Update participant left handler for human conversation phase
+    @transport.event_handler("on_participant_left")
+    async def on_participant_left(transport, participant, reason):
+        await task.queue_frame(EndFrame())
+        await gemini_pipeline_task.queue_frame(EndFrame())
+
+    # gemini_context_aggregator.user().set_messages(
+    #     [
+    #         {
+    #             "role": "system",
+    #             "content": """
+    #             - You are a helpful assistant that tells stories in Japanese.
+    #             - The user will only speak English to you. But you will always respond in Japanese.
+    #             - Start by telling them the Pipeline has now changed in Japanese.
+    #             - Now read this excerpt from "吾輩は猫である" in Japanese:
+    #             "吾輩は猫である":
+    #             吾輩は猫である。名前はまだ無い。
+    #             どこで生れたかとんと見当がつかぬ。
+    #             何でも薄暗いじめじめした所でニャーニャー泣いていた事だけは記憶している。
+    #             吾輩はここで始めて人間というものを見た。
+    #             しかもあとで聞くとそれは書生という人間中で一番獰悪な種族であったそうだ。
+    #             この書生というのは時々我々を捕えて煮て食うという話である。
+    #             しかしその当時は何という考もなかったから別段恐しいとも思わなかった。
+    #             ただ彼の掌に載せられてスーと持ち上げられた時何だかフワフワした感じがあったばかりである。
+    #         - If the user says "No", continue the conversation normally.
+    #         Rules:
+    #         1. Always respond in Japanese.
+    #         2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese.""",
+    #         }
+    #     ]
+    # )
+
+    await gemini_pipeline_task.queue_frames(
+        [gemini_context_aggregator.user().get_context_frame()]
+    )
+
+    await runner.run(gemini_pipeline_task)
 
 
 async def main():
