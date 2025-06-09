@@ -37,6 +37,7 @@ from pipecat.services.elevenlabs.tts import (
     ElevenLabsTTSService,
     ElevenLabsHttpTTSService,
 )
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.azure.tts import AzureTTSService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -54,11 +55,18 @@ from pipecat.transports.services.daily import (
 from pipecat.services.gemini_multimodal_live.gemini import (
     GeminiMultimodalLiveLLMService,
 )
+from pipecatcloud.agent import DailySessionArguments
 
 
 load_dotenv(override=True)
+IS_LOCAL_RUN = os.environ.get("LOCAL_RUN", "0") == "1"
 
-logger.remove(0)
+
+# Configure logger - safely remove default handler if it exists
+try:
+    logger.remove(0)
+except ValueError:
+    pass  # Handler 0 doesn't exist, which is fine
 logger.add(sys.stderr, level="DEBUG")
 
 
@@ -108,27 +116,22 @@ class UserAudioCollector(FrameProcessor):
 async def run_bot(
     room_url: str,
     token: str,
-    daily_api_key: str,
-    daily_api_url: str,
+    config: dict,
 ) -> None:
     """Run the bot with the provided parameters."""
     # Initialize the transport
 
+    logger.info(f"Body: {config}")
+
+    if not IS_LOCAL_RUN:
+        from pipecat.audio.filters.krisp_filter import KrispFilter
+
     params = DailyParams(
-        api_key=daily_api_key,
-        api_url=daily_api_url,
         audio_in_enabled=True,
+        audio_in_filter=None if IS_LOCAL_RUN else KrispFilter(),
         audio_out_enabled=True,
         video_out_enabled=False,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-        # transcription_enabled=True,
-        # transcription_settings=DailyTranscriptionSettings(
-        #     language="multi",
-        #     extra={
-        #         "mip_opt_out": True,
-        #         "keywords": ["Mustang:5", "Kwindla:5", "Snuffleupagus:10"],
-        #     },
-        # ),
     )
 
     transport = DailyTransport(room_url, token, "Japanese Bot", params)
@@ -149,27 +152,27 @@ async def run_bot(
         voice_id="59d4fd2f-f5eb-4410-8105-58db7661144f",  # female voice
     )
 
-    # elevenlabs_male = ElevenLabsTTSService(
-    #     api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-    #     voice_id="GxxMAMfQkDlnqjpzjLHH",  # male voice
-    # )  # https://play.cartesia.ai/voices?language=ja
-
-    # elevenlabs_female = ElevenLabsTTSService(
-    #     api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-    #     voice_id="RBnMinrYKeccY3vaUxlZ",  # female voice
-    # )  # https://elevenlabs.io/app/voice-library?search=GxxMAMfQkDlnqjpzjLHH
-
-    elevenlabs_male = ElevenLabsHttpTTSService(
+    elevenlabs_male = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id="GxxMAMfQkDlnqjpzjLHH",
-        model="eleven_multilingual_v3",
-    )
+        voice_id="GxxMAMfQkDlnqjpzjLHH",  # male voice
+    )  # https://play.cartesia.ai/voices?language=ja
 
-    elevenlabs_female = ElevenLabsHttpTTSService(
+    elevenlabs_female = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id="RBnMinrYKeccY3vaUxlZ",
-        model="eleven_multilingual_v3",
-    )
+        voice_id="RBnMinrYKeccY3vaUxlZ",  # female voice
+    )  # https://elevenlabs.io/app/voice-library?search=GxxMAMfQkDlnqjpzjLHH
+
+    # elevenlabs_male = ElevenLabsHttpTTSService(
+    #     api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+    #     voice_id="GxxMAMfQkDlnqjpzjLHH",
+    #     model="eleven_multilingual_v3",
+    # )
+
+    # elevenlabs_female = ElevenLabsHttpTTSService(
+    #     api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+    #     voice_id="RBnMinrYKeccY3vaUxlZ",
+    #     model="eleven_multilingual_v3",
+    # )
 
     azure_male = AzureTTSService(
         api_key=os.getenv("AZURE_SPEECH_API_KEY"),
@@ -344,10 +347,14 @@ async def run_bot(
     async def openai_filter_female(frame) -> bool:
         return current_provider == "openai" and current_voice == "female"
 
+    # RTVI events for Pipecat client UI
+    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
     # Create the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
+            rtvi,
             stt,
             context_aggregator.user(),
             llm,
@@ -393,15 +400,16 @@ async def run_bot(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(allow_interruptions=True),
-        observers=[TranscriptionLogObserver()],
+        observers=[TranscriptionLogObserver(), RTVIObserver(rtvi)],
     )
 
     # ------------ EVENT HANDLERS ------------
 
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        logger.debug(f"First participant joined: {participant['id']}")
-        # await transport.capture_participant_transcription(participant["id"])
+    @rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        # Notify the client that the bot is ready
+        await rtvi.set_bot_ready()
+        # Kick off the conversation by pushing a context frame to the pipeline
         messages_jp.append(
             {
                 "role": "system",
@@ -426,6 +434,11 @@ async def run_bot(
             }
         )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        logger.debug(f"First participant joined: {participant['id']}")
+        # await transport.capture_participant_transcription(participant["id"])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -500,6 +513,7 @@ async def run_bot(
     gemini_pipeline = Pipeline(
         [
             transport.input(),
+            rtvi,
             gemini_context_aggregator.user(),
             gemini_llm,
             transport.output(),
@@ -525,33 +539,20 @@ async def run_bot(
     await runner.run(gemini_pipeline_task)
 
 
-async def main():
-    """Main function to run the bot."""
+async def bot(args: DailySessionArguments):
+    """Main bot entry point compatible with Pipecat Cloud.
 
-    daily_api_key = os.getenv("DAILY_API_KEY", "")
-    daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
-    room_url = os.getenv("DAILY_ROOM_URL", "")
-    token = os.getenv("DAILY_ROOM_TOKEN", "")
+    Args:
+        room_url: The Daily room URL
+        token: The Daily room token
+        body: The configuration object from the request body
+        session_id: The session ID for logging
+    """
+    logger.info(f"Bot process initialized {args.room_url} {args.token}")
 
-    if not daily_api_key:
-        logger.error("DAILY_API_KEY environment variable is not set.")
-        return
-
-    if not daily_api_url:
-        logger.error("DAILY_API_URL environment variable is not set.")
-        return
-
-    if not room_url or not token:
-        logger.error("Room URL or token is not provided.")
-        return
-
-    await run_bot(
-        room_url,
-        token,
-        daily_api_key,
-        daily_api_url,
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        await run_bot(args.room_url, args.token, args.body)
+        logger.info("Bot process completed")
+    except Exception as e:
+        logger.exception(f"Error in bot process: {str(e)}")
+        raise
