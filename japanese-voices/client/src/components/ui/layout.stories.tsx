@@ -1,11 +1,8 @@
-import type { Story, StoryDefault } from "@ladle/react";
 import { LayoutSection } from "./layout";
 
-export default {
-  title: "Primitives",
-} satisfies StoryDefault;
+// Simple story components for component documentation
 
-export const LayoutSectionDefault: Story = () => (
+export const LayoutSectionDefault = () => (
   <LayoutSection key="section-1">
     <div>
       <h1>Section 1</h1>

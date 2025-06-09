@@ -1,19 +1,23 @@
 import { Button } from "@/components/ui/button";
 import { LoaderIcon, VolumeOffIcon } from "@/icons";
-import type { Story, StoryDefault } from "@ladle/react";
 
-export default {
-  title: "Primitives",
-} satisfies StoryDefault;
+// Simple story components for component documentation
 
-export const ButtonPrimary: Story<{
-  label: string;
-  variant: "default" | "outline" | "secondary" | "ghost" | "link";
-  size: "default" | "sm" | "lg";
-  isDisabled: boolean;
-  isLoading: boolean;
-  withIcon: boolean;
-}> = ({ label, variant, size, isDisabled, isLoading, withIcon }) => (
+export const ButtonPrimary = ({ 
+  label = "My Button",
+  variant = "default",
+  size = "default",
+  isDisabled = false,
+  isLoading = false,
+  withIcon = false
+}: {
+  label?: string;
+  variant?: "default" | "outline" | "secondary" | "ghost" | "link";
+  size?: "default" | "sm" | "lg";
+  isDisabled?: boolean;
+  isLoading?: boolean;
+  withIcon?: boolean;
+}) => (
   <Button
     variant={variant}
     size={size}
@@ -25,34 +29,17 @@ export const ButtonPrimary: Story<{
   </Button>
 );
 
-ButtonPrimary.args = {
-  label: "My Button",
-  variant: "default",
-  isDisabled: false,
-  isLoading: false,
-  withIcon: false,
-};
-ButtonPrimary.argTypes = {
-  variant: {
-    options: ["default", "outline", "secondary", "ghost", "link"],
-    control: { type: "select" },
-    defaultValue: "default",
-  },
-  size: {
-    options: ["default", "sm", "lg"],
-    control: { type: "select" },
-    defaultValue: "default",
-  },
-};
-
-ButtonPrimary.storyName = "Button";
-
-export const ButtonIcon: Story<{
-  variant: "default" | "outline" | "secondary" | "ghost" | "link";
-  size: "default" | "sm" | "lg";
-  isDisabled: boolean;
-  isLoading: boolean;
-}> = ({ variant, size, isDisabled, isLoading }) => (
+export const ButtonIcon = ({ 
+  variant = "default",
+  size = "default",
+  isDisabled = false,
+  isLoading = false
+}: {
+  variant?: "default" | "outline" | "secondary" | "ghost" | "link";
+  size?: "default" | "sm" | "lg";
+  isDisabled?: boolean;
+  isLoading?: boolean;
+}) => (
   <Button
     isIcon
     variant={variant}
@@ -66,25 +53,3 @@ export const ButtonIcon: Story<{
     )}
   </Button>
 );
-
-ButtonIcon.args = {
-  variant: "default",
-  size: "default",
-  isDisabled: false,
-  isLoading: false,
-};
-
-ButtonIcon.argTypes = {
-  variant: {
-    options: ["default", "outline", "secondary", "ghost", "link"],
-    control: { type: "select" },
-    defaultValue: "default",
-  },
-  size: {
-    options: ["default", "sm", "lg"],
-    control: { type: "select" },
-    defaultValue: "default",
-  },
-};
-
-ButtonIcon.storyName = "Icon Button";

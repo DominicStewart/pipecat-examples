@@ -33,7 +33,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.elevenlabs.tts import (
+    ElevenLabsTTSService,
+    ElevenLabsHttpTTSService,
+)
 from pipecat.services.azure.tts import AzureTTSService
 from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -146,15 +149,27 @@ async def run_bot(
         voice_id="59d4fd2f-f5eb-4410-8105-58db7661144f",  # female voice
     )
 
-    elevenlabs_male = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id="GxxMAMfQkDlnqjpzjLHH",  # male voice
-    )  # https://play.cartesia.ai/voices?language=ja
+    # elevenlabs_male = ElevenLabsTTSService(
+    #     api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+    #     voice_id="GxxMAMfQkDlnqjpzjLHH",  # male voice
+    # )  # https://play.cartesia.ai/voices?language=ja
 
-    elevenlabs_female = ElevenLabsTTSService(
+    # elevenlabs_female = ElevenLabsTTSService(
+    #     api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+    #     voice_id="RBnMinrYKeccY3vaUxlZ",  # female voice
+    # )  # https://elevenlabs.io/app/voice-library?search=GxxMAMfQkDlnqjpzjLHH
+
+    elevenlabs_male = ElevenLabsHttpTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id="RBnMinrYKeccY3vaUxlZ",  # female voice
-    )  # https://elevenlabs.io/app/voice-library?search=GxxMAMfQkDlnqjpzjLHH
+        voice_id="GxxMAMfQkDlnqjpzjLHH",
+        model="eleven_multilingual_v3",
+    )
+
+    elevenlabs_female = ElevenLabsHttpTTSService(
+        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+        voice_id="RBnMinrYKeccY3vaUxlZ",
+        model="eleven_multilingual_v3",
+    )
 
     azure_male = AzureTTSService(
         api_key=os.getenv("AZURE_SPEECH_API_KEY"),

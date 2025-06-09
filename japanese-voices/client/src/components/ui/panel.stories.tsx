@@ -4,16 +4,16 @@ import {
   PanelHeader,
   PanelTitle,
 } from "@/components/ui/panel";
-import type { Story, StoryDefault } from "@ladle/react";
 
-export default {
-  title: "Primitives",
-} satisfies StoryDefault;
+// Simple story components for component documentation
 
-export const PanelHeaderDefault: Story<{
-  label: string;
-  variant: "default" | "inline";
-}> = ({ label, variant }) => (
+export const PanelHeaderDefault = ({ 
+  label = "Hello world",
+  variant = "default" as "default" | "inline"
+}: {
+  label?: string;
+  variant?: "default" | "inline";
+}) => (
   <Panel>
     <PanelHeader variant={variant}>
       <PanelTitle>{label}</PanelTitle>
@@ -21,16 +21,3 @@ export const PanelHeaderDefault: Story<{
     <PanelContent>My Panel</PanelContent>
   </Panel>
 );
-
-PanelHeaderDefault.args = {
-  label: "Hello world",
-};
-PanelHeaderDefault.argTypes = {
-  variant: {
-    options: ["default", "inline"],
-    control: { type: "radio" },
-    defaultValue: "default",
-  },
-};
-
-PanelHeaderDefault.storyName = "Panel";

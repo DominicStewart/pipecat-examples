@@ -1,7 +1,5 @@
-import type { Story, StoryDefault } from "@ladle/react";
+import CircularWaveformComponent from "./index";
 
-export default {
-  title: "Visualizations",
-} satisfies StoryDefault;
+// Simple story components for component documentation
 
-export const CircularWaveform: Story = () => <CircularWaveform />;
+export const CircularWaveform = () => <CircularWaveformComponent />;
