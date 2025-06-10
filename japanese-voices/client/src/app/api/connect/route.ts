@@ -6,18 +6,40 @@ export async function POST(request: NextRequest) {
 	try {
 		// Log the request for debugging
 		console.log("Received bot connection request:", request.method);
+		const { MY_CUSTOM_DATA } = await request.json();
 
 		// Get the FastAPI server URL from environment (use 127.0.0.1 to force IPv4)
 		const serverUrl = process.env.FASTAPI_SERVER_URL || "http://127.0.0.1:7860";
-
+		let headers_content;
 		console.log("Calling FastAPI server to start bot...");
-
-		// Call the FastAPI server's /connect endpoint
-		const response = await fetch(`${serverUrl}/connect`, {
-			method: "POST",
-			headers: {
+		if (serverUrl === "http://127.0.0.1:7860") {
+			headers_content = {
 				"Content-Type": "application/json",
-			},
+			};
+		} else {
+			headers_content = {
+				Authorization: `Bearer ${process.env.PIPECAT_CLOUD_API_KEY}`,
+				"Content-Type": "application/json",
+			};
+		}
+		let body_content;
+		if (serverUrl === "http://127.0.0.1:7860") {
+			body_content = {};
+		} else {
+			body_content = {
+				// Create Daily room
+				createDailyRoom: true,
+				// Optionally set Daily room properties
+				dailyRoomProperties: { start_video_off: true },
+				// Optionally pass custom data to the bot
+				body: { MY_CUSTOM_DATA },
+			};
+		}
+		// Call the FastAPI server's /connect endpoint
+		const response = await fetch(`${serverUrl}/start`, {
+			method: "POST",
+			headers: headers_content,
+			body: JSON.stringify(body_content),
 		});
 
 		if (!response.ok) {
@@ -39,12 +61,12 @@ export async function POST(request: NextRequest) {
 		return NextResponse.json({
 			room_url: data.room_url,
 			token: data.token,
-			config: [
-				{
-					service: "tts",
-					options: [{ name: "voice", value: "alloy" }],
-				},
-			],
+			// config: [
+			// 	{
+			// 		service: "tts",
+			// 		options: [{ name: "voice", value: "alloy" }],
+			// 	},
+			// ],
 		});
 	} catch (error) {
 		console.error("Error in bot connection endpoint:", error);

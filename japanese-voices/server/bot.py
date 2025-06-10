@@ -141,25 +141,38 @@ async def run_bot(
         live_options=LiveOptions(language="multi"),
     )
 
+    cartesia_model = os.getenv("CARTESIA_MODEL", "sonic-2")
     # Initialize the TTS service
+    cartesia_male_voice = os.getenv(
+        "CARTESIA_MALE_VOICE", "06950fa3-534d-46b3-93bb-f852770ea0b5"
+    )
     cartesia_male = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
-        voice_id="06950fa3-534d-46b3-93bb-f852770ea0b5",  # male voice
+        model=cartesia_model,
+        voice_id=cartesia_male_voice,  # male voice
     )
 
+    cartesia_female_voice = os.getenv(
+        "CARTESIA_FEMALE_VOICE", "59d4fd2f-f5eb-4410-8105-58db7661144f"
+    )
     cartesia_female = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
-        voice_id="59d4fd2f-f5eb-4410-8105-58db7661144f",  # female voice
+        model=cartesia_model,
+        voice_id=cartesia_female_voice,  # female voice
     )
 
+    elevenlabs_male_voice = os.getenv("ELEVENLABS_MALE_VOICE", "GxxMAMfQkDlnqjpzjLHH")
     elevenlabs_male = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id="GxxMAMfQkDlnqjpzjLHH",  # male voice
+        voice_id=elevenlabs_male_voice,  # male voice
     )  # https://play.cartesia.ai/voices?language=ja
 
+    elevenlabs_female_voice = os.getenv(
+        "ELEVENLABS_FEMALE_VOICE", "RBnMinrYKeccY3vaUxlZ"
+    )
     elevenlabs_female = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id="RBnMinrYKeccY3vaUxlZ",  # female voice
+        voice_id=elevenlabs_female_voice,  # female voice
     )  # https://elevenlabs.io/app/voice-library?search=GxxMAMfQkDlnqjpzjLHH
 
     # elevenlabs_male = ElevenLabsHttpTTSService(
@@ -173,33 +186,44 @@ async def run_bot(
     #     voice_id="RBnMinrYKeccY3vaUxlZ",
     #     model="eleven_multilingual_v3",
     # )
+    azure_male_language = os.getenv("AZURE_MALE_LANGUAGE", "ja-JP")
+    azure_male_rate = os.getenv("AZURE_MALE_RATE", "1.1")
+    azure_male_style = os.getenv("AZURE_MALE_STYLE", "default")
 
     azure_male = AzureTTSService(
         api_key=os.getenv("AZURE_SPEECH_API_KEY"),
         region=os.getenv("AZURE_SPEECH_REGION"),
-        voice="ja-JP-ja-JP-KeitaNeural",  # male voice
+        # voice="ja-JP-ja-JP-KeitaNeural",  # male voice
+        voice=os.getenv("AZURE_MALE_VOICE", "ja-JP-ja-JP-KeitaNeural"),
         params=AzureTTSService.InputParams(
-            language="ja-JP", rate="1.1", style="default"
+            language=azure_male_language, rate=azure_male_rate, style=azure_male_style
         ),
     )  # https://speech.microsoft.com/portal/voicegallery
 
+    azure_female_language = os.getenv("AZURE_FEMALE_LANGUAGE", "ja-JP")
+    azure_female_rate = os.getenv("AZURE_FEMALE_RATE", "1.1")
+    azure_female_style = os.getenv("AZURE_FEMALE_STYLE", "default")
     azure_female = AzureTTSService(
         api_key=os.getenv("AZURE_SPEECH_API_KEY"),
         region=os.getenv("AZURE_SPEECH_REGION"),
         voice="ja-JP-NanamiNeural",  # female voice
         params=AzureTTSService.InputParams(
-            language="ja-JP", rate="1.1", style="default"
+            language=azure_female_language,
+            rate=azure_female_rate,
+            style=azure_female_style,
         ),
     )
 
+    openai_male_voice = os.getenv("OPENAI_MALE_VOICE", "alloy")
     openai_male = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        voice="alloy",  # male voice
+        voice=openai_male_voice,  # male voice
     )  # https://www.openai.fm/ / https://platform.openai.com/docs/guides/text-to-speech#supported-languages
 
+    openai_female_voice = os.getenv("OPENAI_FEMALE_VOICE", "nova")
     openai_female = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        voice="nova",  # female voice
+        voice=openai_female_voice,  # female voice
     )
 
     # Initialize the LLM service
@@ -474,9 +498,12 @@ async def run_bot(
     1. Always respond in Japanese.
     2. If the user asks to hear a story, read the excerpt from "吾輩は猫である" in Japanese."""
 
+    gemini_voice = os.getenv(
+        "GEMINI_VOICE", "Puck"
+    )  # Aoede, Charon, Fenrir, Kore, Puck
     gemini_llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        # voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        voice_id=gemini_voice,  # Aoede, Charon, Fenrir, Kore, Puck
         system_instruction=gemini_pipeline_system_instructions,
         # model="gemini-2.5-flash-preview-05-20",
         model="models/gemini-2.5-flash-preview-native-audio-dialog",
