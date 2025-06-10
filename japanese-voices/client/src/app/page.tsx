@@ -20,6 +20,7 @@ export default function Home() {
 			headers: {
 				"Content-Type": "application/json",
 			},
+			body: JSON.stringify({}), // Send empty JSON object instead of no body
 		});
 
 		if (!response.ok) {

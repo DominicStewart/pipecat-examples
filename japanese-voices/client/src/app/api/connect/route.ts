@@ -6,7 +6,19 @@ export async function POST(request: NextRequest) {
 	try {
 		// Log the request for debugging
 		console.log("Received bot connection request:", request.method);
-		const { MY_CUSTOM_DATA } = await request.json();
+		
+		// Safely parse JSON with fallback for empty body
+		let requestBody: { MY_CUSTOM_DATA?: unknown } = {};
+		try {
+			const text = await request.text();
+			if (text) {
+				requestBody = JSON.parse(text);
+			}
+		} catch {
+			console.log("No JSON body provided, using empty object");
+		}
+		
+		const { MY_CUSTOM_DATA } = requestBody;
 
 		// Get the FastAPI server URL from environment (use 127.0.0.1 to force IPv4)
 		const serverUrl = process.env.FASTAPI_SERVER_URL || "http://127.0.0.1:7860";
