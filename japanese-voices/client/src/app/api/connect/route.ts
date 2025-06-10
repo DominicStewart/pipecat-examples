@@ -8,7 +8,9 @@ export async function POST(request: NextRequest) {
 		console.log("Received bot connection request:", request.method);
 		console.log("Environment variables:", {
 			FASTAPI_SERVER_URL: process.env.FASTAPI_SERVER_URL,
-			PIPECAT_CLOUD_API_KEY: process.env.PIPECAT_CLOUD_API_KEY ? "[SET]" : "[NOT SET]"
+			PIPECAT_CLOUD_API_KEY: process.env.PIPECAT_CLOUD_API_KEY
+				? "[SET]"
+				: "[NOT SET]",
 		});
 
 		// Safely parse JSON with fallback for empty body
@@ -56,7 +58,7 @@ export async function POST(request: NextRequest) {
 		console.log("Making request to:", `${serverUrl}/start`);
 		console.log("Request headers:", headers_content);
 		console.log("Request body:", JSON.stringify(body_content));
-		
+
 		const response = await fetch(`${serverUrl}/start`, {
 			method: "POST",
 			headers: headers_content,
@@ -64,7 +66,10 @@ export async function POST(request: NextRequest) {
 		});
 
 		console.log("Response status:", response.status);
-		console.log("Response headers:", Object.fromEntries(response.headers.entries()));
+		console.log(
+			"Response headers:",
+			Object.fromEntries(response.headers.entries())
+		);
 
 		if (!response.ok) {
 			const errorText = await response.text();
@@ -75,7 +80,7 @@ export async function POST(request: NextRequest) {
 					error: "Failed to start bot server",
 					details: errorText,
 					status: response.status,
-					serverUrl: serverUrl
+					serverUrl: serverUrl,
 				},
 				{ status: 500 }
 			);
@@ -100,12 +105,12 @@ export async function POST(request: NextRequest) {
 		console.error("Error details:", {
 			message: error instanceof Error ? error.message : String(error),
 			stack: error instanceof Error ? error.stack : undefined,
-			serverUrl: process.env.FASTAPI_SERVER_URL
+			serverUrl: process.env.FASTAPI_SERVER_URL,
 		});
 		return NextResponse.json(
-			{ 
+			{
 				error: "Failed to connect to bot server",
-				details: error instanceof Error ? error.message : String(error)
+				details: error instanceof Error ? error.message : String(error),
 			},
 			{ status: 500 }
 		);
