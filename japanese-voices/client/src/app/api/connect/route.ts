@@ -124,16 +124,17 @@ export async function POST(request: NextRequest) {
 		}
 
 		// Return the response in the format expected by the widget
-		return NextResponse.json({
+		const finalResponse = {
 			url: roomUrl, // Daily.co expects 'url', not 'room_url'
 			token: token,
-			// config: [
-			// 	{
-			// 		service: "tts",
-			// 		options: [{ name: "voice", value: "alloy" }],
-			// 	},
-			// ],
-		});
+		};
+
+		console.log("Final API response being sent:", finalResponse);
+		console.log("Final url type:", typeof finalResponse.url);
+		console.log("Final url value:", finalResponse.url);
+		console.log("Final token type:", typeof finalResponse.token);
+
+		return NextResponse.json(finalResponse);
 	} catch (error) {
 		console.error("Error in bot connection endpoint:", error);
 		console.error("Error details:", {

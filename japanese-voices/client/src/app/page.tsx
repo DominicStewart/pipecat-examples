@@ -24,10 +24,20 @@ export default function Home() {
 		});
 
 		if (!response.ok) {
+			const errorText = await response.text();
+			console.error("API connect failed:", response.status, errorText);
 			throw new Error("Failed to connect");
 		}
 
-		return response;
+		// Clone the response so we can read it twice
+		const responseClone = response.clone();
+		const data = await response.json();
+		console.log("API response received:", data);
+		console.log("url type:", typeof data.url);
+		console.log("url value:", data.url);
+		console.log("token type:", typeof data.token);
+
+		return responseClone;
 	};
 
 	return (
