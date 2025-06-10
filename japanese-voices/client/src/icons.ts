@@ -12,4 +12,5 @@ export {
   Loader2 as LoaderIcon,
   MoreHorizontal as EllipsisIcon,
   ChevronDown as SelectChevronIcon,
+  Send as SendIcon,
 } from "lucide-react";
