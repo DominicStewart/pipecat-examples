@@ -13,33 +13,7 @@ const Widget = dynamic(
 );
 
 export default function Home() {
-	const handleConnect = async () => {
-		// Connect to your bot server
-		const response = await fetch("/api/connect", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({}), // Send empty JSON object instead of no body
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			console.error("API connect failed:", response.status, errorText);
-			throw new Error("Failed to connect");
-		}
-
-		// Clone the response so we can read it twice
-		const responseClone = response.clone();
-		const data = await response.json();
-		console.log("API response received:", data);
-		console.log("url type:", typeof data.url);
-		console.log("url value:", data.url);
-		console.log("token type:", typeof data.token);
-
-		return responseClone;
-	};
-
+	// Function that calls
 	return (
 		<>
 			{/* Main page content */}
@@ -167,7 +141,34 @@ export default function Home() {
 
 			{/* Fixed positioned widget - will appear in bottom right */}
 			<Widget
-				onConnect={handleConnect}
+				onConnect={async () => {
+					const response = await fetch("/api/connect", {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({
+							MY_CUSTOM_DATA: {}, // or whatever data you need
+						}),
+					});
+
+					if (!response.ok) {
+						throw new Error("Failed to connect to bot");
+					}
+
+					const data = await response.json();
+					if (data.error) {
+						throw new Error(data.error);
+					}
+
+					return new Response(
+						JSON.stringify({
+							room_url: data.room_url,
+							token: data.token,
+						}),
+						{ status: 200 }
+					);
+				}}
 				collapsedButtonText="Speak with Japanese AI Assistant"
 				enableTextInput={false}
 				showTranscription={false}
