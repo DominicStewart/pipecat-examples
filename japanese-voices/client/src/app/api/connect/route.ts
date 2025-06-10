@@ -88,10 +88,40 @@ export async function POST(request: NextRequest) {
 
 		const data = await response.json();
 		console.log("Bot started successfully:", data);
+		console.log("Data keys:", Object.keys(data));
+		console.log("room_url type:", typeof data.room_url);
+		console.log("room_url value:", data.room_url);
+		console.log("token type:", typeof data.token);
+		console.log("token value:", data.token);
+
+		// Validate the response data
+		if (!data.room_url || typeof data.room_url !== "string") {
+			console.error("Invalid room_url in response:", data.room_url);
+			return NextResponse.json(
+				{
+					error: "Invalid response from bot server",
+					details: `room_url is ${typeof data.room_url}: ${data.room_url}`,
+					fullResponse: data,
+				},
+				{ status: 500 }
+			);
+		}
+
+		if (!data.token || typeof data.token !== "string") {
+			console.error("Invalid token in response:", data.token);
+			return NextResponse.json(
+				{
+					error: "Invalid response from bot server",
+					details: `token is ${typeof data.token}: ${data.token}`,
+					fullResponse: data,
+				},
+				{ status: 500 }
+			);
+		}
 
 		// Return the response in the format expected by the widget
 		return NextResponse.json({
-			room_url: data.room_url,
+			url: data.room_url, // Daily.co expects 'url', not 'room_url'
 			token: data.token,
 			// config: [
 			// 	{
