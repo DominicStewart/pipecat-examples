@@ -2,11 +2,6 @@
 
 @import "tailwindcss";
 
-:root {
-	--background: #ffffff;
-	--foreground: #171717;
-}
-
 @theme inline {
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
@@ -14,15 +9,192 @@
 	--font-mono: var(--font-geist-mono);
 }
 
+/* Widget positioning variables */
+:root {
+	--spacing-widget-v: 1.5rem; /* 24px - vertical spacing from bottom */
+	--spacing-widget-h: 1.5rem; /* 24px - horizontal spacing from right */
+	--spacing-widget-gap: 1rem; /* 16px - gap between widget elements */
+	--width-widget-panel: 400px; /* Panel width on larger screens */
+	--height-widget-panel: 540px; /* Panel height */
+	--widget-safe-area: 120px; /* Safe area for mobile content */
+}
+
+@media (min-width: 768px) {
+	:root {
+		--spacing-widget-v: 2rem; /* 32px on larger screens */
+		--spacing-widget-h: 2rem; /* 32px on larger screens */
+		--widget-safe-area: 80px; /* Smaller safe area on larger screens */
+	}
+}
+
+/* Widget positioning styles */
+@layer components {
+	.gradient-text {
+		background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+		-webkit-background-clip: text;
+		background-clip: text;
+		-webkit-text-fill-color: transparent;
+		color: transparent;
+		background-size: 200% 200%;
+		animation: gradient-shift 4s ease-in-out infinite;
+	}
+
+	@keyframes gradient-shift {
+		0%,
+		100% {
+			background-position: 0% 50%;
+		}
+		50% {
+			background-position: 100% 50%;
+		}
+	}
+
+	.widget {
+		bottom: var(--spacing-widget-v);
+		right: var(--spacing-widget-h);
+		gap: var(--spacing-widget-gap);
+		z-index: 1000;
+	}
+
+	.widget[data-open="true"] {
+		height: calc(100svh - var(--spacing-widget-h) * 2);
+	}
+
+	.widget .widget-panel {
+		width: calc(100vw - var(--spacing-widget-h) * 2);
+		backdrop-filter: blur(20px);
+		background: rgba(0, 0, 0, 0.8);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+	}
+
+	@media (min-width: 768px) {
+		.widget .widget-panel {
+			width: var(--width-widget-panel);
+			background: rgba(0, 0, 0, 0.9);
+		}
+	}
+
+	/* Mobile content padding to avoid widget overlap */
+	.mobile-safe-bottom {
+		padding-bottom: var(--widget-safe-area);
+	}
+
+	@media (min-width: 768px) {
+		.mobile-safe-bottom {
+			padding-bottom: var(--widget-safe-area);
+		}
+	}
+
+	/* Enhanced glassmorphism effect */
+	.glass-card {
+		backdrop-filter: blur(16px);
+		background: rgba(255, 255, 255, 0.1);
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+	}
+
+	/* Animated background elements */
+	@keyframes float {
+		0%,
+		100% {
+			transform: translateY(0px);
+		}
+		50% {
+			transform: translateY(-20px);
+		}
+	}
+
+	.floating-element {
+		animation: float 6s ease-in-out infinite;
+	}
+
+	.floating-element:nth-child(2) {
+		animation-delay: -2s;
+	}
+
+	.floating-element:nth-child(3) {
+		animation-delay: -4s;
+	}
+
+	/* Command card hover effects */
+	.command-card {
+		transition: all 0.3s ease;
+		transform: translateY(0);
+	}
+
+	.command-card:hover {
+		transform: translateY(-2px);
+		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+	}
+
+	/* Pulse animation for accent elements */
+	@keyframes gentle-pulse {
+		0%,
+		100% {
+			opacity: 0.6;
+			transform: scale(1);
+		}
+		50% {
+			opacity: 1;
+			transform: scale(1.05);
+		}
+	}
+
+	.gentle-pulse {
+		animation: gentle-pulse 3s ease-in-out infinite;
+	}
+}
+
 @media (prefers-color-scheme: dark) {
 	:root {
 		--background: #0a0a0a;
 		--foreground: #ededed;
+		--primary: #6366f1;
+		--accent: #ec4899;
+	}
+
+	.glass-card {
+		background: rgba(0, 0, 0, 0.3);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+	}
+}
+
+@media (prefers-color-scheme: light) {
+	:root {
+		--background: #ffffff;
+		--foreground: #1a1a1a;
+		--primary: #4f46e5;
+		--accent: #db2777;
 	}
 }
 
 body {
 	background: var(--background);
 	color: var(--foreground);
-	font-family: Arial, Helvetica, sans-serif;
+	font-family: var(--font-sans, Arial, Helvetica, sans-serif);
+	min-height: 100vh;
+	overflow-x: hidden;
+}
+
+/* Smooth scrolling */
+html {
+	scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+	width: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: rgba(0, 0, 0, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+	background: linear-gradient(135deg, #6366f1, #8b5cf6);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: linear-gradient(135deg, #4f46e5, #7c3aed);
 }
