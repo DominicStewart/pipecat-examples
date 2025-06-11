@@ -151,12 +151,13 @@ export default function Home() {
 							MY_CUSTOM_DATA: {}, // or whatever data you need
 						}),
 					});
-
+					console.log("Response from connect endpoint:", response);
 					if (!response.ok) {
 						throw new Error("Failed to connect to bot");
 					}
 
 					const data = await response.json();
+					console.log("Data from connect endpoint:", data);
 					if (data.error) {
 						throw new Error(data.error);
 					}
