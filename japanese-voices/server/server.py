@@ -164,7 +164,7 @@ async def rtvi_connect() -> Dict[Any, Any]:
     print("Starting bot")
     room_url, token = await start()
 
-    return {"room_url": room_url, "token": token}
+    return {"dailyRoom": room_url, "dailyToken": token}
 
 
 if __name__ == "__main__":
