@@ -13,22 +13,7 @@ const Widget = dynamic(
 );
 
 export default function Home() {
-	const handleConnect = async () => {
-		// Connect to your bot server
-		const response = await fetch("/api/connect", {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
-		});
-
-		if (!response.ok) {
-			throw new Error("Failed to connect");
-		}
-
-		return response;
-	};
-
+	// Function that calls
 	return (
 		<>
 			{/* Main page content */}
@@ -59,7 +44,9 @@ export default function Home() {
 						<div className="max-w-2xl mx-auto">
 							<p className="text-lg md:text-xl text-gray-700 dark:text-gray-300 mb-8 leading-relaxed">
 								Experience the quality of various Japanese Text-To-Speech
-								services through our interactive AI assistant.
+								services through our interactive AI assistant. Assistant will
+								start with the male OpenAI TTS voice. You can switch voices or
+								providers at any time.
 							</p>
 						</div>
 					</div>
@@ -79,8 +66,8 @@ export default function Home() {
 											Switch TTS Provider
 										</h3>
 										<p className="text-sm text-gray-600 dark:text-gray-300">
-											&ldquo;Switch operator to Cartesia / Elevenlabs /
-											OpenAI&rdquo;
+											&ldquo;I would like to switch to Cartesia / Elevenlabs /
+											OpenAI / Azure / Google&rdquo;
 										</p>
 									</div>
 
@@ -95,60 +82,49 @@ export default function Home() {
 									</div>
 								</div>
 
-								<div className="space-y-4">
-									<div className="bg-gradient-to-r from-pink-500/20 to-rose-500/20 rounded-xl p-4 border border-pink-300/30">
-										<h3 className="font-semibold text-pink-300 dark:text-pink-200 mb-2 flex items-center">
-											<span className="w-2 h-2 bg-pink-400 rounded-full mr-3"></span>
-											Switch Pipeline
-										</h3>
-										<p className="text-sm text-gray-600 dark:text-gray-300">
-											&ldquo;Switch Pipeline&rdquo; (Google LLM + Native Voice)
-										</p>
-									</div>
-
-									<div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-xl p-4 border border-cyan-300/30">
-										<h3 className="font-semibold text-cyan-300 dark:text-cyan-200 mb-2 flex items-center">
-											<span className="w-2 h-2 bg-cyan-400 rounded-full mr-3"></span>
-											Language Support
-										</h3>
-										<p className="text-sm text-gray-600 dark:text-gray-300">
-											Ask in English, get responses in Japanese
-										</p>
-									</div>
+								<div className="bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-xl p-4 border border-cyan-300/30">
+									<h3 className="font-semibold text-cyan-300 dark:text-cyan-200 mb-2 flex items-center">
+										<span className="w-2 h-2 bg-cyan-400 rounded-full mr-3"></span>
+										Language Support
+									</h3>
+									<p className="text-sm text-gray-600 dark:text-gray-300">
+										Ask in English, get responses in English. Story is read in
+										Japanese
+									</p>
 								</div>
-							</div>
-
-							{/* Literary Reference */}
-							<div className="text-center bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-xl p-6 border border-amber-300/20">
-								<h3 className="font-semibold text-amber-600 dark:text-amber-300 mb-2">
-									📚 Featured Literature
-								</h3>
-								<p className="text-gray-700 dark:text-gray-300">
-									The assistant will read excerpts from{" "}
-									<em>&ldquo;Wagahai wa Neko de Aru&rdquo;</em>
-									<br className="hidden sm:block" />
-									(吾輩は猫である) by Natsume Sōseki
-								</p>
 							</div>
 						</div>
-					</div>
 
-					{/* Call to Action */}
-					<div className="text-center max-w-md mx-auto">
-						<div className="bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-2xl p-6 border border-indigo-300/30 backdrop-blur-sm">
-							<h3 className="text-xl font-semibold mb-3 gradient-text">
-								Ready to Experience Japanese TTS?
+						{/* Literary Reference */}
+						<div className="text-center bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-xl p-6 border border-amber-300/20">
+							<h3 className="font-semibold text-amber-600 dark:text-amber-300 mb-2">
+								📚 Featured Literature
 							</h3>
-							<p className="text-gray-600 dark:text-gray-300 mb-4">
-								Click the assistant button to start your voice conversation
+							<p className="text-gray-700 dark:text-gray-300">
+								The assistant will read excerpts from{" "}
+								<em>&ldquo;Wagahai wa Neko de Aru&rdquo;</em>
+								<br className="hidden sm:block" />
+								(吾輩は猫である) by Natsume Sōseki
 							</p>
-							<div className="flex items-center justify-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-								<span>Look for the</span>
-								<div className="bg-gray-800 text-white px-3 py-1 rounded-full text-xs">
-									Assistant
-								</div>
-								<span>button ↘️</span>
+						</div>
+					</div>
+				</div>
+
+				{/* Call to Action */}
+				<div className="text-center max-w-md mx-auto">
+					<div className="bg-gradient-to-r from-indigo-500/20 to-purple-500/20 rounded-2xl p-6 border border-indigo-300/30 backdrop-blur-sm">
+						<h3 className="text-xl font-semibold mb-3 gradient-text">
+							Ready to Experience Japanese TTS?
+						</h3>
+						<p className="text-gray-600 dark:text-gray-300 mb-4">
+							Click the assistant button to start your voice conversation
+						</p>
+						<div className="flex items-center justify-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+							<span>Look for the</span>
+							<div className="bg-gray-800 text-white px-3 py-1 rounded-full text-xs">
+								Assistant
 							</div>
+							<span>button ↘️</span>
 						</div>
 					</div>
 				</div>
@@ -156,7 +132,35 @@ export default function Home() {
 
 			{/* Fixed positioned widget - will appear in bottom right */}
 			<Widget
-				onConnect={handleConnect}
+				onConnect={async () => {
+					const response = await fetch("/api/connect", {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({
+							MY_CUSTOM_DATA: {}, // or whatever data you need
+						}),
+					});
+					console.log("Response from connect endpoint:", response);
+					if (!response.ok) {
+						throw new Error("Failed to connect to bot");
+					}
+
+					const data = await response.json();
+					console.log("Data from connect endpoint:", data);
+					if (data.error) {
+						throw new Error(data.error);
+					}
+
+					return new Response(
+						JSON.stringify({
+							room_url: data.room_url,
+							token: data.token,
+						}),
+						{ status: 200 }
+					);
+				}}
 				collapsedButtonText="Speak with Japanese AI Assistant"
 				enableTextInput={false}
 				showTranscription={false}

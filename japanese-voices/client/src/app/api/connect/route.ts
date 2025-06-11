@@ -7,47 +7,68 @@ export async function POST(request: NextRequest) {
 		// Log the request for debugging
 		console.log("Received bot connection request:", request.method);
 
-		// Get the FastAPI server URL from environment (use 127.0.0.1 to force IPv4)
-		const serverUrl = process.env.FASTAPI_SERVER_URL || "http://127.0.0.1:7860";
+		// Parse request body (optional, since your client doesn't send much)
+		const body = await request.json().catch(() => ({}));
 
-		console.log("Calling FastAPI server to start bot...");
+		// Get the server URL from environment
+		const serverUrl =
+			process.env.FASTAPI_SERVER_URL ||
+			"https://api.pipecat.daily.co/v1/public/jpvoice/start";
+		const authKey = process.env.PIPECAT_CLOUD_API_KEY;
 
-		// Call the FastAPI server's /connect endpoint
-		const response = await fetch(`${serverUrl}/connect`, {
+		console.log("Using server URL:", serverUrl);
+		console.log("authKey:", authKey ? "Found" : "Missing");
+
+		// Prepare headers
+		const headers = {
+			"Content-Type": "application/json",
+			...(authKey && { Authorization: `Bearer ${authKey}` }),
+		};
+
+		// Prepare request body
+		const requestBody = {
+			createDailyRoom: true,
+			// Add any additional data from the request if needed
+			...body,
+		};
+
+		console.log("Calling external API...");
+
+		// Call the external API
+		const response = await fetch(serverUrl, {
 			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-			},
+			headers,
+			body: JSON.stringify(requestBody),
 		});
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			console.error("Failed to start bot via FastAPI server:", errorText);
+			console.error("Failed to connect to external API:", errorText);
 			return NextResponse.json(
 				{
-					error: "Failed to start bot server",
+					error: "Failed to connect to Pipecat",
 					details: errorText,
 				},
-				{ status: 500 }
+				{ status: response.status }
 			);
 		}
 
 		const data = await response.json();
-		console.log("Bot started successfully:", data);
+		console.log("External API response:", data);
+
+		// Check for API-level errors
+		if (data.error) {
+			console.error("API returned error:", data.error);
+			return NextResponse.json({ error: data.error }, { status: 400 });
+		}
 
 		// Return the response in the format expected by the widget
 		return NextResponse.json({
-			room_url: data.room_url,
-			token: data.token,
-			config: [
-				{
-					service: "tts",
-					options: [{ name: "voice", value: "alloy" }],
-				},
-			],
+			room_url: data.dailyRoom,
+			token: data.dailyToken,
 		});
 	} catch (error) {
-		console.error("Error in bot connection endpoint:", error);
+		console.error("Error in connect endpoint:", error);
 		return NextResponse.json(
 			{ error: "Failed to connect to bot server" },
 			{ status: 500 }

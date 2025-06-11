@@ -150,7 +150,7 @@ async def start_agent():
     return RedirectResponse(room_url)
 
 
-@app.post("/connect")
+@app.post("/start")
 async def rtvi_connect() -> Dict[Any, Any]:
     """A user endpoint for launching a bot agent and retrieving the room/token credentials.
 
@@ -164,7 +164,7 @@ async def rtvi_connect() -> Dict[Any, Any]:
     print("Starting bot")
     room_url, token = await start()
 
-    return {"room_url": room_url, "token": token}
+    return {"dailyRoom": room_url, "dailyToken": token}
 
 
 if __name__ == "__main__":

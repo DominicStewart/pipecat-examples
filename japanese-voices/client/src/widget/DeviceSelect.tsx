@@ -39,18 +39,28 @@ const DeviceSelect: React.FC = () => {
 					<SelectTrigger size="lg" className="w-full font-sans text-sm">
 						<SelectValue
 							placeholder={
-								selectedMic && selectedMic.label
+								availableMics.length === 0
+									? "Grant microphone access to see devices"
+									: selectedMic && selectedMic.label
 									? selectedMic.label
 									: "Loading devices..."
 							}
 						/>
 					</SelectTrigger>
 					<SelectContent>
-						{availableMics.map((mic) => (
-							<SelectItem key={mic.deviceId} value={mic.deviceId}>
-								{mic.label}
+						{availableMics.length === 0 ? (
+							<SelectItem value="no-devices" disabled>
+								No microphone devices available
 							</SelectItem>
-						))}
+						) : (
+							availableMics
+								.filter((mic) => mic.deviceId && mic.deviceId.trim() !== "")
+								.map((mic) => (
+									<SelectItem key={mic.deviceId} value={mic.deviceId}>
+										{mic.label || "Unknown device"}
+									</SelectItem>
+								))
+						)}
 					</SelectContent>
 				</Select>
 			</div>
