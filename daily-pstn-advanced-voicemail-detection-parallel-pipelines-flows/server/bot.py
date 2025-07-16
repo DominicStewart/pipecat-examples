@@ -16,8 +16,6 @@ from typing import Deque
 from dotenv import load_dotenv
 from loguru import logger
 from pipecat_flows import (
-    ContextStrategy,
-    ContextStrategyConfig,
     FlowArgs,
     FlowManager,
     FlowResult,
@@ -69,12 +67,12 @@ logger.add(sys.stderr, level="DEBUG")
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
-use_prebuilt = False
+use_prebuilt = True
 
 # Simple constants for model states
 VOICEMAIL_MODE = "voicemail"
 HUMAN_MODE = "human"
-MUTE_MODE = "mute"
+DETECTION_MODE = "detection"
 
 VOICEMAIL_CONFIDENCE_THRESHOLD = 0.6
 HUMAN_CONFIDENCE_THRESHOLD = 0.6
@@ -162,15 +160,18 @@ def create_greeting_node() -> NodeConfig:
                 "role": "system",
                 "content": """You are a friendly chatbot. Your responses will be
                     converted to audio, so avoid special characters.
-                    Be conversational and helpful. Please only say 'This is virtual agent John - Am I speaking to Tim?' once at the start of the conversation.""",
+                    Be conversational and helpful. The user will have just replied to your greeting and question asking if they are Tim.
+                    If they say yes, proceed to the conversation node.""",
             }
         ],
         "task_messages": [
             {
                 "role": "system",
-                "content": """Please say 'This is virtual agent John - Am I speaking to Tim?""",
+                "content": """Decide if the user is Tim based on their response.
+                    If they say yes, call handle_greeting to proceed to the conversation.""",
             }
         ],
+        "respond_immediately": False,
         "functions": [
             FlowsFunctionSchema(
                 name="handle_greeting",
@@ -204,7 +205,9 @@ def create_conversation_node() -> NodeConfig:
             FlowsFunctionSchema(
                 name="handle_conversation",
                 description="Continue the conversation with the human",
-                properties={"message": {"type": "string", "description": "The response message"}},
+                properties={
+                    "message": {"type": "string", "description": "The response message"}
+                },
                 required=["message"],
                 handler=handle_conversation,
             ),
@@ -238,6 +241,18 @@ def create_end_node() -> NodeConfig:
 
 
 # ------------ SIMPLIFIED CLASSES ------------
+
+
+class DebugClass(FrameProcessor):
+    """A simple debug class to log frames."""
+
+    def __init__(self):
+        super().__init__()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        logger.debug(f"DebugClass received frame: {frame} in direction: {direction}")
+        await self.push_frame(frame, direction)
 
 
 class VoicemailDetectionObserver(BaseObserver):
@@ -308,9 +323,13 @@ class VADPrebufferProcessor(FrameProcessor):
             maxlen=prebuffer_frame_count
         )
 
-    def _should_passthrough_frame(self, frame: Frame, direction: FrameDirection) -> bool:
+    def _should_passthrough_frame(
+        self, frame: Frame, direction: FrameDirection
+    ) -> bool:
         """Determines if a frame should bypass the buffering logic entirely."""
-        return isinstance(frame, (SystemFrame, EndFrame)) or direction != self._direction
+        return (
+            isinstance(frame, (SystemFrame, EndFrame)) or direction != self._direction
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -356,23 +375,28 @@ class VADPrebufferProcessor(FrameProcessor):
 class BlockAudioFrames(FrameProcessor):
     """Blocks audio frames from being processed further, conditionally based on mode."""
 
-    def __init__(self, mode_checker):
+    def __init__(self, mode_checker, allowed_modes):
         super().__init__()
         self._mode_checker = mode_checker
+        self._allowed_modes = (
+            allowed_modes if isinstance(allowed_modes, list) else [allowed_modes]
+        )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         # Block audio frames based on current mode
-        if isinstance(frame, InputAudioRawFrame):
+        if (
+            isinstance(frame, InputAudioRawFrame)
+            or isinstance(frame, UserStartedSpeakingFrame)
+            or isinstance(frame, UserStoppedSpeakingFrame)
+            or isinstance(frame, TranscriptionFrame)
+        ):
             current_mode = self._mode_checker()
-            if current_mode == MUTE_MODE:
-                return  # Do not push audio frames in MUTE_MODE
-            if current_mode == VOICEMAIL_MODE:
-                return  # Do not push audio frames in VOICEMAIL_MODE
-            if current_mode == HUMAN_MODE:
+            if current_mode in self._allowed_modes:
                 await self.push_frame(frame, direction)
-                return
+            # If current mode is not in allowed modes, just return (block the frame)
+            return
 
         # Pass all other frames through
         await self.push_frame(frame, direction)
@@ -393,7 +417,13 @@ class OutputGate(FrameProcessor):
 
         # Always pass system frames and function call frames
         if isinstance(
-            frame, (SystemFrame, EndFrame, FunctionCallInProgressFrame, FunctionCallResultFrame)
+            frame,
+            (
+                SystemFrame,
+                EndFrame,
+                FunctionCallInProgressFrame,
+                FunctionCallResultFrame,
+            ),
         ):
             if isinstance(frame, StartFrame):
                 await self._start()
@@ -471,7 +501,9 @@ class UserAudioCollector(FrameProcessor):
             else:
                 # Maintain rolling buffer
                 self._audio_frames.append(frame)
-                frame_duration = len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                frame_duration = (
+                    len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
+                )
                 buffer_duration = frame_duration * len(self._audio_frames)
                 while buffer_duration > self._start_secs:
                     self._audio_frames.pop(0)
@@ -495,7 +527,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     caller_id = dialout_settings.get("caller_id")
 
     # Simple state tracking
-    current_mode = MUTE_MODE
+    current_mode = DETECTION_MODE
     is_voicemail = False
 
     # Notifier for human conversation gate
@@ -512,9 +544,14 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         confidence = params.arguments["confidence"]
         reasoning = params.arguments["reasoning"]
 
-        logger.info(f"Voicemail detected - confidence: {confidence}, reasoning: {reasoning}")
+        logger.info(
+            f"Voicemail detected - confidence: {confidence}, reasoning: {reasoning}"
+        )
 
-        if confidence >= VOICEMAIL_CONFIDENCE_THRESHOLD and current_mode == MUTE_MODE:
+        if (
+            confidence >= VOICEMAIL_CONFIDENCE_THRESHOLD
+            and current_mode == DETECTION_MODE
+        ):
             current_mode = VOICEMAIL_MODE
             is_voicemail = True
 
@@ -525,7 +562,9 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
             await voicemail_tts.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
-        await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
+        await params.result_callback(
+            {"confidence": f"{confidence}", "reasoning": reasoning}
+        )
 
     async def human_detected(params: FunctionCallParams):
         nonlocal current_mode, is_voicemail
@@ -533,22 +572,21 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         confidence = params.arguments["confidence"]
         reasoning = params.arguments["reasoning"]
 
-        logger.info(f"Human detected - confidence: {confidence}, reasoning: {reasoning}")
+        logger.info(
+            f"Human detected - confidence: {confidence}, reasoning: {reasoning}"
+        )
 
-        if confidence >= HUMAN_CONFIDENCE_THRESHOLD and current_mode == MUTE_MODE:
+        if confidence >= HUMAN_CONFIDENCE_THRESHOLD and current_mode == DETECTION_MODE:
             current_mode = HUMAN_MODE
             is_voicemail = False
 
             await human_notifier.notify()
-            await flow_manager.initialize(create_greeting_node())
+            message = "Hello, this is virtual agent John. Am I speaking to Tim?"
+            await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
 
-        await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
-
-    # async def terminate_call(params: FunctionCallParams):
-    #     logger.info("Terminating call")
-    #     await asyncio.sleep(3)  # Brief delay before termination
-    #     await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-    #     await params.result_callback({"status": "call terminated"})
+        await params.result_callback(
+            {"confidence": f"{confidence}", "reasoning": reasoning}
+        )
 
     # ------------ TRANSPORT & SERVICES ------------
 
@@ -666,7 +704,9 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     # ------------ CONTEXTS & FUNCTIONS ------------
 
     detection_context = GoogleLLMContext()
-    detection_context_aggregator = detection_llm.create_context_aggregator(detection_context)
+    detection_context_aggregator = detection_llm.create_context_aggregator(
+        detection_context
+    )
 
     human_context = GoogleLLMContext()
     human_context_aggregator = human_llm.create_context_aggregator(human_context)
@@ -681,18 +721,24 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         """Get the current conversation mode."""
         return current_mode
 
-    audio_collector = UserAudioCollector(detection_context, detection_context_aggregator.user())
-    human_gate = OutputGate(human_notifier, start_open=False)
-    block_audio_frames = BlockAudioFrames(get_current_mode)
+    audio_collector = UserAudioCollector(
+        detection_context, detection_context_aggregator.user()
+    )
+    voicemail_audio_blocker = BlockAudioFrames(
+        get_current_mode, [VOICEMAIL_MODE, DETECTION_MODE]
+    )
+    human_audio_blocker = BlockAudioFrames(get_current_mode, [HUMAN_MODE])
 
     _VADPrebufferProcessor = VADPrebufferProcessor()
 
     # Filter functions
     async def voicemail_filter(frame) -> bool:
-        return current_mode == VOICEMAIL_MODE
+        return current_mode == VOICEMAIL_MODE or DETECTION_MODE
 
     async def human_filter(frame) -> bool:
         return current_mode == HUMAN_MODE
+
+    debug_processor = DebugClass()
 
     # ------------ PIPELINE ------------
 
@@ -702,22 +748,26 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             ParallelPipeline(
                 # Voicemail detection branch
                 [
+                    voicemail_audio_blocker,  # Allows audio at the start to detect voicemail, and while in voicemail mode. Is blocked when LLM detects human.
                     _VADPrebufferProcessor,
                     audio_collector,
                     detection_context_aggregator.user(),
                     detection_llm,
-                    FunctionFilter(voicemail_filter),
+                    FunctionFilter(
+                        voicemail_filter
+                    ),  # Filters out all frames but system frames. Voicemail_audio_blocker blocks certain system frames. So we need this in this part of the pipeline to block non-system frames.
                 ],
                 [voicemail_tts],
                 [
                     # Human conversation branch
-                    block_audio_frames,
+                    human_audio_blocker,  # Allows audio when in human mode, blocks when voicemail is detected or when deciding if human or voicemail.
                     stt,
                     human_context_aggregator.user(),
                     human_llm,
-                    # human_gate,
+                    FunctionFilter(
+                        human_filter
+                    ),  # Filters out all frames but system frames. human_audio_blocker blocks certain system frames. So we need this in this part of the pipeline to block non-system frames.
                     human_tts,
-                    FunctionFilter(human_filter),
                     human_context_aggregator.assistant(),
                 ],
             ),
@@ -751,6 +801,8 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
+        await flow_manager.initialize(create_greeting_node())
+
         if not use_prebuilt:
             dialout_params = {"phoneNumber": phone_number}
             if caller_id:
@@ -774,9 +826,6 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         await pipeline_task.queue_frame(EndFrame())
-
-    # Remove the problematic on_pipeline_started handler
-    # The context will be initialized naturally when frames flow through the pipeline
 
     # ------------ RUN ------------
 
